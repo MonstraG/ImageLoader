@@ -8,6 +8,7 @@ import javafx.beans.property.DoubleProperty
 import javafx.beans.property.SimpleDoubleProperty
 import javafx.beans.property.SimpleStringProperty
 import javafx.beans.property.StringProperty
+import javafx.concurrent.Task
 import javafx.scene.control.Tooltip
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
@@ -40,6 +41,7 @@ class MainView : View() {
     private var stackPane = stackpane()
 
     private var selectedRegionBorders = setOf<Pos>()
+    private var selectedRegionCells = setOf<Pos>()
 
     override val root = borderpane {
         center {
@@ -62,19 +64,34 @@ class MainView : View() {
                     stackPane = this
                     imageview {
                         imageView = this
+                        var currentRegionTask: FXTask<*>? = null
                         setOnMouseClicked {
+                            currentRegionTask?.cancel()
                             deselectRegion()
                             val x = (it.x / zoom.value).toInt()
                             val y = (it.y / zoom.value).toInt()
-                            regionTooltip.text = "($x, $y) - ${cellMap[x][y].biome.Name}"
-                            regionTooltip.show(this, it.screenX + 25, it.screenY)
+                            val tooltipAnchorX = it.screenX + 25
+                            val tooltipAnchorY = it.screenY
+                            regionTooltip.text = "(${x}, ${y}) - ${cellMap[x][y].biome.Name}, loading region..."
+                            regionTooltip.show(this, tooltipAnchorX, tooltipAnchorY)
+                            runAsync {
+                                currentRegionTask = this
+                                calculateRegion(Pos(x, y))
+                                if (!this.isCancelled) {
+                                    selectRegion()
+                                }
+                            } ui {
+                                regionTooltip.text = "($x, $y) - ${cellMap[x][y].biome.Name}, size: ${selectedRegionCells.size}"
+                                regionTooltip.show(imageView, tooltipAnchorX, tooltipAnchorY)
+                            }
                             tooltipPos = Pair(it.screenX, it.screenY)
-                            selectRegion(Pos(x, y))
                         }
                         setOnMouseMoved {
                             if (regionTooltip.isShowing &&
                                 sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40) {
                                 regionTooltip.hide()
+
+                                currentRegionTask?.cancel()
                             }
                         }
                     }
@@ -140,6 +157,8 @@ class MainView : View() {
     }
 
     private fun loadAndParse() {
+        cellMap.clear()
+        biomeCounts.clear()
         parsedImg = WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
         detectBiomes(parsedImg)
         imageView.image = parsedImg
@@ -183,11 +202,12 @@ class MainView : View() {
         }
     }
 
-    private fun selectRegion(pos: Pos) {
-        val regionCells = mutableSetOf<Pos>()
+    private fun calculateRegion(pos: Pos) {
+        val regionCells = mutableSetOf(pos)
         val borderCells = mutableSetOf<Pos>()
         val startingBiome = cellMap[pos.w][pos.h].biome
         val unvisitedCellsStack = mutableListOf(pos)
+
         while (unvisitedCellsStack.isNotEmpty()) {
             val cur = unvisitedCellsStack.removeAt(0)
             val cell: Cell = cellMap[cur.w][cur.h]
@@ -203,6 +223,10 @@ class MainView : View() {
             }
         }
         selectedRegionBorders = borderCells
+        selectedRegionCells = regionCells
+    }
+
+    private fun selectRegion() {
         selectedRegionBorders.forEach {
             parsedImg.pixelWriter.setColor(it.w, it.h, colorFromRGB(0, 255, 0))
         }
