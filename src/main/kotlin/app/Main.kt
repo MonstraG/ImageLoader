@@ -1,6 +1,7 @@
 package app
 
 import app.models.*
+import app.utils.colorFromRGB
 import app.utils.findClosest
 import app.utils.sq
 import javafx.beans.property.DoubleProperty
@@ -14,7 +15,6 @@ import javafx.scene.image.WritableImage
 import javafx.scene.input.TransferMode
 import javafx.scene.paint.Color
 import javafx.scene.text.Font
-import javafx.util.Duration
 import tornadofx.*
 import java.io.File
 import java.io.FileInputStream
@@ -33,12 +33,13 @@ class MainView : View() {
 
     private val regionTooltip: Tooltip = Tooltip().apply {
         font = Font(12.0)
-        hideDelay = Duration.seconds(0.5)
     }
     private var tooltipPos = Pair(0.0, 0.0)
 
     private var imageView = ImageView()
     private var stackPane = stackpane()
+
+    private var selectedRegionBorders = setOf<Pos>()
 
     override val root = borderpane {
         center {
@@ -62,11 +63,13 @@ class MainView : View() {
                     imageview {
                         imageView = this
                         setOnMouseClicked {
+                            deselectRegion()
                             val x = (it.x / zoom.value).toInt()
                             val y = (it.y / zoom.value).toInt()
                             regionTooltip.text = "($x, $y) - ${cellMap[x][y].biome.Name}"
                             regionTooltip.show(this, it.screenX + 25, it.screenY)
                             tooltipPos = Pair(it.screenX, it.screenY)
+                            selectRegion(Pos(x, y))
                         }
                         setOnMouseMoved {
                             if (regionTooltip.isShowing &&
@@ -154,26 +157,54 @@ class MainView : View() {
     }
 
     private fun detectBiomes(image: WritableImage) {
-        val pixelReader = image.pixelReader
-        val pixelWriter = image.pixelWriter
         val width = srcImg.width.toInt()
         val height = srcImg.height.toInt()
 
         for (w in 0 until width) {
             cellMap.add(mutableListOf())
             for (h in 0 until height) {
-                val pixelColor: Color = pixelReader.getColor(w, h)
+                val pixelColor: Color = image.pixelReader.getColor(w, h)
                 val closestBiome: Biome = findClosest(pixelColor, biomes)
                 val currentCell = Cell(Pos(w, h), closestBiome)
                 biomeCounts[closestBiome] = biomeCounts.getOrPut(closestBiome) { 1 } + 1
                 cellMap[w].add(currentCell)
-                pixelWriter.setColor(w, h, closestBiome.Color)
+                image.pixelWriter.setColor(w, h, closestBiome.Color)
             }
         }
 
+        //todo: properly show this
         println("Biome data:")
         biomeCounts.forEach { println("${it.key.Name}: ${it.value}") }
     }
-}
 
-data class RegionCache(val region: Region, val lastPos: Pos)
+    private fun deselectRegion() {
+        selectedRegionBorders.forEach {
+            parsedImg.pixelWriter.setColor(it.w, it.h, cellMap[it.w][it.h].biome.Color)
+        }
+    }
+
+    private fun selectRegion(pos: Pos) {
+        val regionCells = mutableSetOf<Pos>()
+        val borderCells = mutableSetOf<Pos>()
+        val startingBiome = cellMap[pos.w][pos.h].biome
+        val unvisitedCellsStack = mutableListOf(pos)
+        while (unvisitedCellsStack.isNotEmpty()) {
+            val cur = unvisitedCellsStack.removeAt(0)
+            val cell: Cell = cellMap[cur.w][cur.h]
+            cell.pos.getNeighbors().forEach {
+                if (!regionCells.contains(it) && it.w in 0 until cellMap.size && it.h in 0 until cellMap[it.w].size) {
+                    if (cellMap[it.w][it.h].biome == startingBiome) {
+                        regionCells.add(it)
+                        unvisitedCellsStack.add(it)
+                    } else {
+                        borderCells.add(cur)
+                    }
+                }
+            }
+        }
+        selectedRegionBorders = borderCells
+        selectedRegionBorders.forEach {
+            parsedImg.pixelWriter.setColor(it.w, it.h, colorFromRGB(0, 255, 0))
+        }
+    }
+}
