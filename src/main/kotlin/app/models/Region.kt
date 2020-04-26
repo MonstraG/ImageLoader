@@ -9,29 +9,36 @@ class Region {
         cells[0].biome
     }
 
+    private var cellHashCodeCache = cells.hashCode()
+    private var _borderCellsCache = listOf<Cell>()
+    val borderCells: List<Cell>
+        get() {
+            return if (cellHashCodeCache == cells.hashCode()) {
+                _borderCellsCache
+            } else {
+                cellHashCodeCache = cells.hashCode()
+                _borderCellsCache = cells.filter {
+                    val w = it.pos.w
+                    val h = it.pos.h
+                    val positionsAround = listOf(Pos(w + 1, h), Pos(w, h + 1), Pos(w - 1, h), Pos(w, h - 1))
+                    positionsAround.fold(true) {
+                        found, position -> found && contains(position)
+                    }
+                }
+                _borderCellsCache
+            }
+        }
+
     fun contains(cell: Cell): Boolean {
         if (cell.biome != this.biome) {
             return false
         }
 
-        val borderCell = cells.find { it.pos == cell.pos }
-        if (borderCell != null) {
-            return true
-        }
-
-        val innerCell = cells.find { it.pos == cell.pos }
-        return innerCell != null
+        return contains(cell.pos)
     }
 
-    fun mergeWith(other: Region) {
-        if (other.biome != this.biome) {
-            throw Exception("Attempt to merge with region $this, biome ${this.biome} with region $other of different biome ${other.biome}")
-        }
-
-        this.cells.addAll(other.cells)
-    }
-
-    fun calcBorderCells() {
-        //todo
+    fun contains(pos: Pos): Boolean {
+        val regionCell = cells.find { it.pos == pos }
+        return regionCell != null
     }
 }

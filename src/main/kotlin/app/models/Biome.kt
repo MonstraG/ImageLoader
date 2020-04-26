@@ -5,11 +5,10 @@ import javafx.scene.paint.Color
 
 val biomes = listOf(
     Biome("Frozen wastes", colorFromRGB(255, 255, 250)),
-    Biome("City", colorFromRGB(145, 145, 145)),
     Biome("Tundra", colorFromRGB(85, 85, 70)),
 
     Biome("Mountains", colorFromRGB(80, 80, 75)),
-    Biome("Hills", colorFromRGB(195, 145, 115)),
+    Biome("Hills", colorFromRGB(100, 100, 85)),
 
     Biome("Deep Ocean", colorFromRGB(20, 35, 80)),
     Biome("Ocean", colorFromRGB(40, 65, 120)),
@@ -23,7 +22,6 @@ val biomes = listOf(
     Biome("Plains", colorFromRGB(140, 145, 110)),
 
     Biome("Desert", colorFromRGB(250, 200, 155)),
-    Biome("Steppe", colorFromRGB(100, 100, 90)),
     Biome("Savanna", colorFromRGB(130, 125, 100))
 )
 

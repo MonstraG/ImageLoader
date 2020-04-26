@@ -2,30 +2,40 @@ package app
 
 import app.models.*
 import app.utils.findClosest
+import app.utils.sq
 import javafx.beans.property.DoubleProperty
 import javafx.beans.property.SimpleDoubleProperty
 import javafx.beans.property.SimpleStringProperty
 import javafx.beans.property.StringProperty
+import javafx.scene.control.Tooltip
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
 import javafx.scene.image.WritableImage
 import javafx.scene.input.TransferMode
 import javafx.scene.paint.Color
+import javafx.scene.text.Font
+import javafx.util.Duration
 import tornadofx.*
 import java.io.File
 import java.io.FileInputStream
 import kotlin.math.min
+import kotlin.math.sqrt
 
 class MainView : View() {
     private var srcImg: Image = Image("bahamas.png")
-    private var parsedImg: WritableImage = WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
+    private var parsedImg: WritableImage =
+        WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
     private val cellMap = mutableListOf<MutableList<Cell>>()
     private val biomeCounts = mutableMapOf<Biome, Int>()
-    private val regions = mutableListOf<Region>()
-    private var prevRegionCache: RegionCache? = null
 
     private val selectedFile: StringProperty = SimpleStringProperty()
-    private val zoomProperty: DoubleProperty = SimpleDoubleProperty(1.0)
+    private val zoom: DoubleProperty = SimpleDoubleProperty(1.0)
+
+    private val regionTooltip: Tooltip = Tooltip().apply {
+        font = Font(12.0)
+        hideDelay = Duration.seconds(0.5)
+    }
+    private var tooltipPos = Pair(0.0, 0.0)
 
     private var imageView = ImageView()
     private var stackPane = stackpane()
@@ -51,7 +61,19 @@ class MainView : View() {
                     stackPane = this
                     imageview {
                         imageView = this
-                        //todo: MouseX MouseY select region
+                        setOnMouseClicked {
+                            val x = (it.x / zoom.value).toInt()
+                            val y = (it.y / zoom.value).toInt()
+                            regionTooltip.text = "($x, $y) - ${cellMap[x][y].biome.Name}"
+                            regionTooltip.show(this, it.screenX + 25, it.screenY)
+                            tooltipPos = Pair(it.screenX, it.screenY)
+                        }
+                        setOnMouseMoved {
+                            if (regionTooltip.isShowing &&
+                                sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40) {
+                                regionTooltip.hide()
+                            }
+                        }
                     }
                     stackpaneConstraints {
                         prefWidth = 1024.0
@@ -81,11 +103,11 @@ class MainView : View() {
                     }
                     setOnScroll {
                         if (it.deltaY > 0) {
-                            zoomProperty.value = zoomProperty.value * 1.1
+                            zoom.value = zoom.value * 1.1
                         } else if (it.deltaY < 0) {
-                            zoomProperty.value = zoomProperty.value / 1.1
+                            zoom.value = zoom.value / 1.1
                         }
-                        println("Current zoom level: ${zoomProperty.value}")
+                        println("Current zoom level: ${zoom.value}")
                         resizeImg()
                     }
                 }
@@ -122,13 +144,13 @@ class MainView : View() {
         val widthScale = stackPane.width / imageView.image.width
         val heightScale = stackPane.height / imageView.image.height
         val smallestScale = min(widthScale, heightScale)
-        zoomProperty.value = smallestScale
+        zoom.value = smallestScale
         resizeImg()
     }
 
     private fun resizeImg() {
-        imageView.fitWidth = zoomProperty.value * imageView.image.width
-        imageView.fitHeight = zoomProperty.value * imageView.image.height
+        imageView.fitWidth = zoom.value * imageView.image.width
+        imageView.fitHeight = zoom.value * imageView.image.height
     }
 
     private fun detectBiomes(image: WritableImage) {
@@ -145,44 +167,12 @@ class MainView : View() {
                 val currentCell = Cell(Pos(w, h), closestBiome)
                 biomeCounts[closestBiome] = biomeCounts.getOrPut(closestBiome) { 1 } + 1
                 cellMap[w].add(currentCell)
-
                 pixelWriter.setColor(w, h, closestBiome.Color)
             }
         }
 
+        println("Biome data:")
         biomeCounts.forEach { println("${it.key.Name}: ${it.value}") }
-    }
-
-    private fun detectRegion(cell: Cell) {
-        if (regions.isEmpty()) {
-            addNewRegion(cell)
-        }
-
-        val w = cell.pos.w
-        val h = cell.pos.h
-
-        //cache
-        if (prevRegionCache != null) {
-            if (prevRegionCache!!.lastPos.near(cell.pos)) {
-                print("lel") //todo
-            }
-        }
-
-        //to the top
-        if (h > 0 && cellMap[w][h - 1].biome == cell.biome) {
-            regions.find { it.contains(cell) }?.cells?.add(cell)
-        }
-        //to the left
-        if (h > 0 && cellMap[w][h - 1].biome == cell.biome) {
-            regions.find { it.contains(cell) }?.cells?.add(cell)
-        }
-    }
-
-    private fun addNewRegion(cell: Cell) {
-        val region = Region()
-        region.cells.add(cell)
-        regions.add(region)
-        return
     }
 }
 
