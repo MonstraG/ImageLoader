@@ -16,6 +16,7 @@ import javafx.scene.control.Tooltip
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
 import javafx.scene.image.WritableImage
+import javafx.scene.input.MouseButton
 import javafx.scene.input.TransferMode
 import javafx.scene.paint.Color
 import javafx.scene.text.Font
@@ -67,14 +68,18 @@ class MainView : View() {
                 }
                 stackpane {
                     stackPane = this
+                    var currentRegionTask: FXTask<*>? = null
                     imageview {
                         imageView = this
-                        var currentRegionTask: FXTask<*>? = null
                         setOnMouseClicked {
+                            if (it.button != MouseButton.PRIMARY) {
+                                return@setOnMouseClicked
+                            }
+
                             currentRegionTask?.cancel()
                             deselectRegion()
-                            val x = (it.x / imageZoom.value).toInt()
-                            val y = (it.y / imageZoom.value).toInt()
+                            val x = (it.x / imageZoom.value / userZoom).toInt()
+                            val y = (it.y / imageZoom.value / userZoom).toInt()
                             val tooltipAnchorX = it.screenX + 25
                             val tooltipAnchorY = it.screenY
                             regionTooltip.text = "(${x}, ${y}) - ${cellMap[x][y].biome.Name}, loading region..."
@@ -134,6 +139,11 @@ class MainView : View() {
                         }
                         println("Current zoom level: $userZoom")
                         resizeImg()
+
+                        if (regionTooltip.isShowing) {
+                            regionTooltip.hide()
+                        }
+                        currentRegionTask?.cancel()
                     }
                 }
             }
@@ -175,6 +185,8 @@ class MainView : View() {
     private fun loadAndParse() {
         cellMap.clear()
         biomeCounts.clear()
+        selectedRegionBorders = setOf()
+        selectedRegionCells = setOf()
         parsedImg = WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
         detectBiomes(parsedImg)
         imageView.image = parsedImg
@@ -193,7 +205,6 @@ class MainView : View() {
     private fun resizeImg() {
         imageView.fitWidth = imageZoom.value * imageView.image.width * userZoom
         imageView.fitHeight = imageZoom.value * imageView.image.height * userZoom
-        println("Setting ${imageView.fitWidth} = ${imageZoom.value} * ${imageView.image.width} * ${userZoom}\n${imageView.fitHeight} = ${imageZoom.value} * ${imageView.image.height} * ${userZoom}")
     }
 
     private fun detectBiomes(image: WritableImage) {
