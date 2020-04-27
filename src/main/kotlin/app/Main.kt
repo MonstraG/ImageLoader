@@ -1,6 +1,9 @@
 package app
 
-import app.models.*
+import app.models.Biome
+import app.models.Cell
+import app.models.Pos
+import app.models.biomes
 import app.utils.colorFromRGB
 import app.utils.findClosest
 import app.utils.sq
@@ -8,7 +11,7 @@ import javafx.beans.property.DoubleProperty
 import javafx.beans.property.SimpleDoubleProperty
 import javafx.beans.property.SimpleStringProperty
 import javafx.beans.property.StringProperty
-import javafx.concurrent.Task
+import javafx.beans.value.ChangeListener
 import javafx.scene.control.Tooltip
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
@@ -139,6 +142,16 @@ class MainView : View() {
         selectedFile.onChange {
             loadImg(selectedFile.value)
         }
+
+        val stageSizeListener: ChangeListener<Number> =
+            ChangeListener<Number> { _, _, _ ->
+                if (imageView.image != null) {
+                    detectZoomValue()
+                    resizeImg()
+                }
+            }
+        stackPane.widthProperty().addListener(stageSizeListener)
+        stackPane.heightProperty().addListener(stageSizeListener)
     }
 
     private fun loadImg(file: String) {
@@ -163,11 +176,15 @@ class MainView : View() {
         detectBiomes(parsedImg)
         imageView.image = parsedImg
 
+        detectZoomValue()
+        resizeImg()
+    }
+
+    private fun detectZoomValue() {
         val widthScale = stackPane.width / imageView.image.width
         val heightScale = stackPane.height / imageView.image.height
         val smallestScale = min(widthScale, heightScale)
         zoom.value = smallestScale
-        resizeImg()
     }
 
     private fun resizeImg() {
