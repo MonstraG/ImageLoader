@@ -33,7 +33,9 @@ class MainView : View() {
     private val biomeCounts = mutableMapOf<Biome, Int>()
 
     private val selectedFile: StringProperty = SimpleStringProperty()
-    private val zoom: DoubleProperty = SimpleDoubleProperty(1.0)
+
+    private val imageZoom: DoubleProperty = SimpleDoubleProperty(1.0)
+    private var userZoom: Double = 1.0
 
     private val regionTooltip: Tooltip = Tooltip().apply {
         font = Font(12.0)
@@ -71,8 +73,8 @@ class MainView : View() {
                         setOnMouseClicked {
                             currentRegionTask?.cancel()
                             deselectRegion()
-                            val x = (it.x / zoom.value).toInt()
-                            val y = (it.y / zoom.value).toInt()
+                            val x = (it.x / imageZoom.value).toInt()
+                            val y = (it.y / imageZoom.value).toInt()
                             val tooltipAnchorX = it.screenX + 25
                             val tooltipAnchorY = it.screenY
                             regionTooltip.text = "(${x}, ${y}) - ${cellMap[x][y].biome.Name}, loading region..."
@@ -126,11 +128,11 @@ class MainView : View() {
                     }
                     setOnScroll {
                         if (it.deltaY > 0) {
-                            zoom.value = zoom.value * 1.1
+                            userZoom *= 1.1
                         } else if (it.deltaY < 0) {
-                            zoom.value = zoom.value / 1.1
+                            userZoom /= 1.1
                         }
-                        println("Current zoom level: ${zoom.value}")
+                        println("Current zoom level: $userZoom")
                         resizeImg()
                     }
                 }
@@ -144,14 +146,15 @@ class MainView : View() {
         }
 
         val stageSizeListener: ChangeListener<Number> =
-            ChangeListener<Number> { _, _, _ ->
+            ChangeListener<Number> { wat, new, old ->
                 if (imageView.image != null) {
+                    println("Resizing, wat: ${wat}, old: $old, new: $new")
                     detectZoomValue()
                     resizeImg()
                 }
             }
-        stackPane.widthProperty().addListener(stageSizeListener)
-        stackPane.heightProperty().addListener(stageSizeListener)
+        root.widthProperty().addListener(stageSizeListener)
+        root.heightProperty().addListener(stageSizeListener)
     }
 
     private fun loadImg(file: String) {
@@ -184,12 +187,13 @@ class MainView : View() {
         val widthScale = stackPane.width / imageView.image.width
         val heightScale = stackPane.height / imageView.image.height
         val smallestScale = min(widthScale, heightScale)
-        zoom.value = smallestScale
+        imageZoom.value = smallestScale
     }
 
     private fun resizeImg() {
-        imageView.fitWidth = zoom.value * imageView.image.width
-        imageView.fitHeight = zoom.value * imageView.image.height
+        imageView.fitWidth = imageZoom.value * imageView.image.width * userZoom
+        imageView.fitHeight = imageZoom.value * imageView.image.height * userZoom
+        println("Setting ${imageView.fitWidth} = ${imageZoom.value} * ${imageView.image.width} * ${userZoom}\n${imageView.fitHeight} = ${imageZoom.value} * ${imageView.image.height} * ${userZoom}")
     }
 
     private fun detectBiomes(image: WritableImage) {
