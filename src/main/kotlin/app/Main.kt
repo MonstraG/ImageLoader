@@ -1,25 +1,25 @@
 package app
 
-import app.models.Biome
-import app.models.Cell
-import app.models.Pos
-import app.models.biomes
+import app.models.*
 import app.utils.colorFromRGB
 import app.utils.findClosest
+import app.utils.fmt
 import app.utils.sq
-import javafx.beans.property.DoubleProperty
-import javafx.beans.property.SimpleDoubleProperty
 import javafx.beans.property.SimpleStringProperty
 import javafx.beans.property.StringProperty
 import javafx.beans.value.ChangeListener
+import javafx.scene.control.ScrollPane
 import javafx.scene.control.Tooltip
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
 import javafx.scene.image.WritableImage
 import javafx.scene.input.MouseButton
 import javafx.scene.input.TransferMode
+import javafx.scene.layout.BorderPane
+import javafx.scene.layout.StackPane
 import javafx.scene.paint.Color
 import javafx.scene.text.Font
+import javafx.scene.text.Text
 import tornadofx.*
 import java.io.File
 import java.io.FileInputStream
@@ -28,14 +28,13 @@ import kotlin.math.sqrt
 
 class MainView : View() {
     private var srcImg: Image = Image("bahamas.png")
-    private var parsedImg: WritableImage =
-        WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
+    private var parsedImg: WritableImage = WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
     private val cellMap = mutableListOf<MutableList<Cell>>()
     private val biomeCounts = mutableMapOf<Biome, Int>()
 
     private val selectedFile: StringProperty = SimpleStringProperty()
 
-    private val imageZoom: DoubleProperty = SimpleDoubleProperty(1.0)
+    private var imageZoom: Double = 1.0
     private var userZoom: Double = 1.0
 
     private val regionTooltip: Tooltip = Tooltip().apply {
@@ -43,15 +42,22 @@ class MainView : View() {
     }
     private var tooltipPos = Pair(0.0, 0.0)
 
-    private var imageView = ImageView()
-    private var stackPane = stackpane()
+    private lateinit var imageView: ImageView
+    private lateinit var stackpane: StackPane
 
     private var selectedRegionBorders = setOf<Pos>()
     private var selectedRegionCells = setOf<Pos>()
 
-    override val root = borderpane {
-        center {
-            vbox {
+    private lateinit var logArea: Text
+    private lateinit var logScrollPane: ScrollPane
+
+    override val root = BorderPane()
+
+    init {
+        with(root) {
+            prefWidth = 1000.0
+            prefHeight = 800.0
+            top {
                 menubar {
                     menu("File") {
                         togglegroup {
@@ -66,9 +72,24 @@ class MainView : View() {
                         }
                     }
                 }
+            }
+            left {
+                scrollpane {
+                    logScrollPane = this
+                    prefWidth = 200.0
+
+                    text {
+                        logArea = this
+                    }
+                }
+            }
+            center {
                 stackpane {
-                    stackPane = this
+                    stackpane = this
                     var currentRegionTask: FXTask<*>? = null
+                    style {
+                        backgroundColor = multi(Color.LIGHTGRAY)
+                    }
                     imageview {
                         imageView = this
                         setOnMouseClicked {
@@ -78,8 +99,8 @@ class MainView : View() {
 
                             currentRegionTask?.cancel()
                             deselectRegion()
-                            val x = (it.x / imageZoom.value / userZoom).toInt()
-                            val y = (it.y / imageZoom.value / userZoom).toInt()
+                            val x = (it.x / imageZoom / userZoom).toInt()
+                            val y = (it.y / imageZoom / userZoom).toInt()
                             val tooltipAnchorX = it.screenX + 25
                             val tooltipAnchorY = it.screenY
                             regionTooltip.text = "(${x}, ${y}) - ${cellMap[x][y].biome.Name}, loading region..."
@@ -98,16 +119,12 @@ class MainView : View() {
                         }
                         setOnMouseMoved {
                             if (regionTooltip.isShowing &&
-                                sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40) {
+                                sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40
+                            ) {
                                 regionTooltip.hide()
-
                                 currentRegionTask?.cancel()
                             }
                         }
-                    }
-                    stackpaneConstraints {
-                        prefWidth = 1024.0
-                        prefHeight = 800.0
                     }
                     setOnDragOver {
                         if (it.gestureSource != this) {
@@ -116,19 +133,19 @@ class MainView : View() {
                         it.consume()
                     }
                     setOnDragDropped {
-                        println("Drag dropped event detected")
+                        log("Drag dropped event detected")
                         val file = it.dragboard.files[0]
                         if (it.dragboard.hasFiles()) {
                             val path = file.absolutePath
                             if (path.endsWith(".png") || path.endsWith(".jpeg") || path.endsWith(".jpg")) {
                                 loadImg(file)
                                 it.isDropCompleted = true
-                                println("Image loaded")
+                                log("Image loaded")
                                 return@setOnDragDropped
                             }
-                            println("File found, but it is not an image, path: ${file.absolutePath}")
+                            log("File found, but it is not an image, path: ${file.absolutePath}")
                         } else {
-                            println("No files found in drop event")
+                            log("No files found in drop event")
                         }
                     }
                     setOnScroll {
@@ -137,7 +154,7 @@ class MainView : View() {
                         } else if (it.deltaY < 0) {
                             userZoom /= 1.1
                         }
-                        println("Current zoom level: $userZoom")
+                        log("Current zoom level: ${(userZoom * 100).fmt(2)}%")
                         resizeImg()
 
                         if (regionTooltip.isShowing) {
@@ -148,9 +165,7 @@ class MainView : View() {
                 }
             }
         }
-    }
 
-    init {
         selectedFile.onChange {
             loadImg(selectedFile.value)
         }
@@ -158,13 +173,23 @@ class MainView : View() {
         val stageSizeListener: ChangeListener<Number> =
             ChangeListener<Number> { wat, new, old ->
                 if (imageView.image != null) {
-                    println("Resizing, wat: ${wat}, old: $old, new: $new")
+                    log("Resizing, wat: ${wat}, old: $old, new: $new")
                     detectZoomValue()
                     resizeImg()
                 }
             }
         root.widthProperty().addListener(stageSizeListener)
         root.heightProperty().addListener(stageSizeListener)
+    }
+
+    private fun log(str: String) {
+        println(str)
+        val scrollToBottom = logScrollPane.vvalue == 1.0
+        //todo: scroll to bottom on first log.
+        logArea.text += str + "\n"
+        if (scrollToBottom) {
+            logScrollPane.vvalue = 1.0
+        }
     }
 
     private fun loadImg(file: String) {
@@ -196,15 +221,15 @@ class MainView : View() {
     }
 
     private fun detectZoomValue() {
-        val widthScale = stackPane.width / imageView.image.width
-        val heightScale = stackPane.height / imageView.image.height
-        val smallestScale = min(widthScale, heightScale)
-        imageZoom.value = smallestScale
+        val widthScale = stackpane.width / imageView.image.width
+        val heightScale = stackpane.height / imageView.image.height
+        imageZoom = min(widthScale, heightScale)
     }
 
     private fun resizeImg() {
-        imageView.fitWidth = imageZoom.value * imageView.image.width * userZoom
-        imageView.fitHeight = imageZoom.value * imageView.image.height * userZoom
+        imageView.scaleX = imageZoom * userZoom
+        imageView.scaleY = imageZoom * userZoom
+        //todo: make so that image doesn zoom in over everything else
     }
 
     private fun detectBiomes(image: WritableImage) {
@@ -223,9 +248,8 @@ class MainView : View() {
             }
         }
 
-        //todo: properly show this
-        println("Biome data:")
-        biomeCounts.forEach { println("${it.key.Name}: ${it.value}") }
+        log("Biome data:")
+        biomeCounts.forEach { log("${it.key.Name}: ${it.value}") }
     }
 
     private fun deselectRegion() {

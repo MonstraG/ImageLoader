@@ -9,3 +9,5 @@ fun sq(x: Int): Double {
 fun sq(x: Double): Double {
     return x.pow(2)
 }
+
+fun Double.fmt(digits: Int) = "%.${digits}f".format(this)
