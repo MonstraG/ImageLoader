@@ -38,7 +38,7 @@ class MainView : View() {
     }
     private var tooltipPos = Pair(0.0, 0.0)
 
-    private lateinit var imageView: ImageView
+    private var imageView = ImageView()
     private lateinit var imageViewContainer: Pane
 
     private var selectedRegionBorders = setOf<Pos>()
@@ -51,8 +51,8 @@ class MainView : View() {
 
     init {
         with(root) {
-            prefWidth = 1000.0
-            prefHeight = 800.0
+            prefWidth = 900.0
+            prefHeight = 700.0
             top {
                 add(menu)
             }
@@ -65,8 +65,7 @@ class MainView : View() {
                 style {
                     backgroundColor = multi(Color.LIGHTGRAY)
                 }
-                imageview {
-                    imageView = this
+                add(imageView.apply {
                     setOnMouseClicked {
                         if (it.button != MouseButton.PRIMARY) {
                             return@setOnMouseClicked
@@ -93,14 +92,17 @@ class MainView : View() {
                         tooltipPos = Pair(it.screenX, it.screenY)
                     }
                     setOnMouseMoved {
-                        if (regionTooltip.isShowing &&
-                            sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40
-                        ) {
+                        val movedFar = sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40
+                        if (regionTooltip.isShowing && movedFar) {
                             regionTooltip.hide()
                             currentRegionTask?.cancel()
                         }
+
+                        if (it.isDragDetect && it.isSecondaryButtonDown) {
+                            logger.log("RMB-drag detected")
+                        }
                     }
-                }
+                })
                 setOnDragOver {
                     if (it.gestureSource != this) {
                         it.acceptTransferModes(*TransferMode.COPY_OR_MOVE)
@@ -111,16 +113,18 @@ class MainView : View() {
                     logger.log("Drag dropped event detected")
                     val file = it.dragboard.files[0]
                     if (it.dragboard.hasFiles()) {
+                        it.isDropCompleted = true
+
                         val path = file.absolutePath
-                        if (path.endsWith(".png") || path.endsWith(".jpeg") || path.endsWith(".jpg")) {
+                        val validEnding = path.endsWith(".png") || path.endsWith(".jpeg") || path.endsWith(".jpg")
+                        if (validEnding) {
                             loadImg(file)
-                            it.isDropCompleted = true
-                            logger.log("Image loaded")
-                            return@setOnDragDropped
+                        } else {
+                            logger.log("File found, but it is not an image, path: ${file.absolutePath}")
                         }
-                        logger.log("File found, but it is not an image, path: ${file.absolutePath}")
+
                     } else {
-                        logger.log("No files found in drop event")
+                        logger.log("No files found in DragEvent ")
                     }
                 }
                 setOnScroll {
@@ -142,9 +146,11 @@ class MainView : View() {
 
         //detect appropriate zoom value when image or window  size changes
         val zoomDetector = ChangeListener<Any> { _, _, _ ->
-            val widthScale = imageViewContainer.width / imageView.image.width
-            val heightScale = imageViewContainer.height / imageView.image.height
-            imageZoom.value = min(widthScale, heightScale)
+            if (imageView.image != null) {
+                val widthScale = imageViewContainer.width / imageView.image.width
+                val heightScale = imageViewContainer.height / imageView.image.height
+                imageZoom.value = min(widthScale, heightScale)
+            }
         }
         imageView.imageProperty().addListener(zoomDetector)
         root.widthProperty().addListener(zoomDetector)
@@ -186,13 +192,18 @@ class MainView : View() {
     }
 
     private fun loadAndParse() {
+        //clear stuff from last image
         cellMap.clear()
         selectedRegionBorders = setOf()
         selectedRegionCellsCount = 0
-        parsedImg = WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
+
+        val width = srcImg.width.toInt()
+        val height = srcImg.height.toInt()
+        parsedImg = WritableImage(srcImg.pixelReader, width, height)
         detectBiomes(parsedImg)
         imageView.image = parsedImg
         imageView.isSmooth = false
+        logger.log("Image loaded, size: ${width}x${height}")
     }
 
     private fun detectBiomes(image: WritableImage) {
