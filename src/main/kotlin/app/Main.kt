@@ -1,13 +1,12 @@
 package app
 
 import app.components.Logger
+import app.components.Menu
 import app.models.*
 import app.utils.colorFromRGB
 import app.utils.findClosest
 import app.utils.fmt
 import app.utils.sq
-import javafx.beans.property.SimpleStringProperty
-import javafx.beans.property.StringProperty
 import javafx.beans.value.ChangeListener
 import javafx.scene.control.Tooltip
 import javafx.scene.image.Image
@@ -31,8 +30,6 @@ class MainView : View() {
     private val cellMap = mutableListOf<MutableList<Cell>>()
     private val biomeCounts = mutableMapOf<Biome, Int>()
 
-    private val selectedFile: StringProperty = SimpleStringProperty()
-
     private var imageZoom: Double = 1.0
     private var userZoom: Double = 1.0
 
@@ -50,26 +47,14 @@ class MainView : View() {
     override val root = BorderPane()
 
     private val logger = Logger()
+    private val menu = Menu()
 
     init {
         with(root) {
             prefWidth = 1000.0
             prefHeight = 800.0
             top {
-                menubar {
-                    menu("File") {
-                        togglegroup {
-                            radiomenuitem("Bahamas", this, null, null, "bahamas.png")
-                            radiomenuitem("Europe", this, null, null, "europe.png")
-                            radiomenuitem("Ice ice baby", this, null, null, "ice ice baby.png")
-                            radiomenuitem("Italy", this, null, null, "italy.png")
-                            radiomenuitem("Scandinavia", this, null, null, "scandinavia.png")
-                            radiomenuitem("World", this, null, null, "world.png")
-                            radiomenuitem("World4x", this, null, null, "world4x.png")
-                            bind(selectedFile)
-                        }
-                    }
-                }
+                add(menu)
             }
             left {
                 add(logger)
@@ -155,10 +140,11 @@ class MainView : View() {
             }
         }
 
-        selectedFile.onChange {
-            loadImg(selectedFile.value)
+        menu.selectedFile.onChange {
+            loadImg(menu.selectedFile.value)
         }
 
+        // resize image when window size changes
         val stageSizeListener: ChangeListener<Number> =
             ChangeListener<Number> { _, _, _ ->
                 if (imageView.image != null) {
@@ -180,7 +166,12 @@ class MainView : View() {
     }
 
     private fun loadImg(file: File) {
-        selectedFile.value = "" //deselect radio
+        if (!file.exists()) {
+            logger.log("Couldn't load image - file not found")
+            return
+        }
+
+        menu.selectedFile.value = "" //deselect radio
         srcImg = Image(FileInputStream(file))
         loadAndParse()
     }

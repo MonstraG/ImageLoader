@@ -3,11 +3,11 @@ package app.components
 import javafx.scene.Parent
 import javafx.scene.control.ScrollPane
 import javafx.scene.text.Text
-import tornadofx.Fragment
+import tornadofx.View
 import tornadofx.scrollpane
 import tornadofx.text
 
-class Logger : Fragment() {
+class Logger : View() {
 
     private lateinit var logArea: Text
     private lateinit var logScrollPane: ScrollPane
