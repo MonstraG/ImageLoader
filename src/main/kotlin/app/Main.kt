@@ -7,6 +7,7 @@ import app.utils.colorFromRGB
 import app.utils.findClosest
 import app.utils.fmt
 import app.utils.sq
+import javafx.beans.property.SimpleDoubleProperty
 import javafx.beans.value.ChangeListener
 import javafx.scene.control.Tooltip
 import javafx.scene.image.Image
@@ -28,10 +29,9 @@ class MainView : View() {
     private var srcImg: Image = Image("bahamas.png")
     private var parsedImg: WritableImage = WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
     private val cellMap = mutableListOf<MutableList<Cell>>()
-    private val biomeCounts = mutableMapOf<Biome, Int>()
 
-    private var imageZoom: Double = 1.0
-    private var userZoom: Double = 1.0
+    private var imageZoom = SimpleDoubleProperty(1.0)
+    private var userZoom = SimpleDoubleProperty(1.0)
 
     private val regionTooltip: Tooltip = Tooltip().apply {
         font = Font(12.0)
@@ -42,7 +42,7 @@ class MainView : View() {
     private lateinit var imageViewContainer: Pane
 
     private var selectedRegionBorders = setOf<Pos>()
-    private var selectedRegionCells = setOf<Pos>()
+    private var selectedRegionCellsCount = 0
 
     override val root = BorderPane()
 
@@ -74,20 +74,20 @@ class MainView : View() {
 
                         currentRegionTask?.cancel()
                         deselectRegion()
-                        val x = (it.x / imageZoom / userZoom).toInt()
-                        val y = (it.y / imageZoom / userZoom).toInt()
+                        val x = (it.x / imageZoom.value / userZoom.value).toInt()
+                        val y = (it.y / imageZoom.value / userZoom.value).toInt()
                         val tooltipAnchorX = it.screenX + 25
                         val tooltipAnchorY = it.screenY
                         regionTooltip.text = "(${x}, ${y}) - ${cellMap[x][y].biome.Name}, loading region..."
                         regionTooltip.show(this, tooltipAnchorX, tooltipAnchorY)
                         runAsync {
                             currentRegionTask = this
-                            calculateRegion(Pos(x, y))
+                            floodDetectRegion(Pos(x, y))
                             if (!this.isCancelled) {
                                 selectRegion()
                             }
                         } ui {
-                            regionTooltip.text = "($x, $y) - ${cellMap[x][y].biome.Name}, size: ${selectedRegionCells.size}"
+                            regionTooltip.text = "($x, $y) - ${cellMap[x][y].biome.Name}, size: $selectedRegionCellsCount"
                             regionTooltip.show(imageView, tooltipAnchorX, tooltipAnchorY)
                         }
                         tooltipPos = Pair(it.screenX, it.screenY)
@@ -125,16 +125,12 @@ class MainView : View() {
                 }
                 setOnScroll {
                     if (it.deltaY > 0) {
-                        userZoom *= 1.1
+                        userZoom.value *= 1.1
                     } else if (it.deltaY < 0) {
-                        userZoom /= 1.1
+                        userZoom.value /= 1.1
                     }
-                    logger.log("Zoom level: ${(userZoom * 100).fmt(2)}%")
-                    resizeImg()
+                    logger.log("Zoom level: ${(userZoom.value * 100).fmt(2)}%")
 
-                    if (regionTooltip.isShowing) {
-                        regionTooltip.hide()
-                    }
                     currentRegionTask?.cancel()
                 }
             }
@@ -144,16 +140,29 @@ class MainView : View() {
             loadImg(menu.selectedFile.value)
         }
 
-        // resize image when window size changes
-        val stageSizeListener: ChangeListener<Number> =
-            ChangeListener<Number> { _, _, _ ->
-                if (imageView.image != null) {
-                    detectZoomValue()
-                    resizeImg()
-                }
+        //detect appropriate zoom value when image or window  size changes
+        val zoomDetector = ChangeListener<Any> { _, _, _ ->
+            val widthScale = imageViewContainer.width / imageView.image.width
+            val heightScale = imageViewContainer.height / imageView.image.height
+            imageZoom.value = min(widthScale, heightScale)
+        }
+        imageView.imageProperty().addListener(zoomDetector)
+        root.widthProperty().addListener(zoomDetector)
+        root.heightProperty().addListener(zoomDetector)
+
+        //rescale image when zoom values change, also hide tooltip
+        val rescaler = ChangeListener<Number> { _, _, _ ->
+            val scale = imageZoom.value * userZoom.value
+            imageView.scaleX = scale
+            imageView.scaleY = scale
+
+            if (regionTooltip.isShowing) {
+                regionTooltip.hide()
             }
-        root.widthProperty().addListener(stageSizeListener)
-        root.heightProperty().addListener(stageSizeListener)
+            //todo: make so that image doesn't zoom in over everything else
+        }
+        imageZoom.addListener(rescaler)
+        userZoom.addListener(rescaler)
     }
 
     private fun loadImg(file: String) {
@@ -178,32 +187,16 @@ class MainView : View() {
 
     private fun loadAndParse() {
         cellMap.clear()
-        biomeCounts.clear()
         selectedRegionBorders = setOf()
-        selectedRegionCells = setOf()
+        selectedRegionCellsCount = 0
         parsedImg = WritableImage(srcImg.pixelReader, srcImg.width.toInt(), srcImg.height.toInt())
         detectBiomes(parsedImg)
         imageView.image = parsedImg
         imageView.isSmooth = false
-
-        detectZoomValue()
-        resizeImg()
-    }
-
-    private fun detectZoomValue() {
-        val widthScale = imageViewContainer.width / imageView.image.width
-        val heightScale = imageViewContainer.height / imageView.image.height
-        imageZoom = min(widthScale, heightScale)
-    }
-
-    private fun resizeImg() {
-        val scale = imageZoom * userZoom
-        imageView.scaleX = scale
-        imageView.scaleY = scale
-        //todo: make so that image doesn zoom in over everything else
     }
 
     private fun detectBiomes(image: WritableImage) {
+        val biomeCounts = mutableMapOf<Biome, Int>()
         val width = srcImg.width.toInt()
         val height = srcImg.height.toInt()
 
@@ -212,10 +205,11 @@ class MainView : View() {
             for (h in 0 until height) {
                 val pixelColor: Color = image.pixelReader.getColor(w, h)
                 val closestBiome: Biome = findClosest(pixelColor, biomes)
-                val currentCell = Cell(Pos(w, h), closestBiome)
                 biomeCounts[closestBiome] = biomeCounts.getOrPut(closestBiome) { 1 } + 1
-                cellMap[w].add(currentCell)
                 image.pixelWriter.setColor(w, h, closestBiome.Color)
+
+                val currentCell = Cell(Pos(w, h), closestBiome)
+                cellMap[w].add(currentCell)
             }
         }
 
@@ -223,13 +217,7 @@ class MainView : View() {
         biomeCounts.forEach { logger.log("${it.key.Name}: ${it.value}") }
     }
 
-    private fun deselectRegion() {
-        selectedRegionBorders.forEach {
-            parsedImg.pixelWriter.setColor(it.w, it.h, cellMap[it.w][it.h].biome.Color)
-        }
-    }
-
-    private fun calculateRegion(pos: Pos) {
+    private fun floodDetectRegion(pos: Pos) {
         val regionCells = mutableSetOf(pos)
         val borderCells = mutableSetOf<Pos>()
         val startingBiome = cellMap[pos.w][pos.h].biome
@@ -238,8 +226,10 @@ class MainView : View() {
         while (unvisitedCellsStack.isNotEmpty()) {
             val cur = unvisitedCellsStack.removeAt(0)
             val cell: Cell = cellMap[cur.w][cur.h]
+            val isUnvisited = { it: Pos ->  !regionCells.contains(it) && it.w in 0 until cellMap.size && it.h in 0 until cellMap[it.w].size}
+
             cell.pos.getNeighbors().forEach {
-                if (!regionCells.contains(it) && it.w in 0 until cellMap.size && it.h in 0 until cellMap[it.w].size) {
+                if (isUnvisited(pos)) {
                     if (cellMap[it.w][it.h].biome == startingBiome) {
                         regionCells.add(it)
                         unvisitedCellsStack.add(it)
@@ -250,12 +240,18 @@ class MainView : View() {
             }
         }
         selectedRegionBorders = borderCells
-        selectedRegionCells = regionCells
+        selectedRegionCellsCount = regionCells.size
     }
 
     private fun selectRegion() {
         selectedRegionBorders.forEach {
             parsedImg.pixelWriter.setColor(it.w, it.h, colorFromRGB(0, 255, 0))
+        }
+    }
+
+    private fun deselectRegion() {
+        selectedRegionBorders.forEach {
+            parsedImg.pixelWriter.setColor(it.w, it.h, cellMap[it.w][it.h].biome.Color)
         }
     }
 }
