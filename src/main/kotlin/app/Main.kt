@@ -3,7 +3,6 @@ package app
 import app.components.Logger
 import app.components.Menu
 import app.models.*
-import app.utils.colorFromRGB
 import app.utils.findClosest
 import app.utils.fmt
 import app.utils.sq
@@ -14,9 +13,10 @@ import javafx.scene.image.Image
 import javafx.scene.image.ImageView
 import javafx.scene.image.WritableImage
 import javafx.scene.input.MouseButton
+import javafx.scene.input.MouseEvent
 import javafx.scene.input.TransferMode
-import javafx.scene.layout.BorderPane
 import javafx.scene.layout.Pane
+import javafx.scene.layout.VBox
 import javafx.scene.paint.Color
 import javafx.scene.text.Font
 import tornadofx.*
@@ -44,98 +44,128 @@ class MainView : View() {
     private var selectedRegionBorders = setOf<Pos>()
     private var selectedRegionCellsCount = 0
 
-    override val root = BorderPane()
+    override val root = VBox()
 
     private val logger = Logger()
     private val menu = Menu()
 
     init {
         with(root) {
-            prefWidth = 900.0
+            prefWidth = 1000.0
             prefHeight = 700.0
-            top {
-                add(menu)
-            }
-            left {
+            add(menu)
+            hbox {
                 add(logger)
-            }
-            center {
                 var currentRegionTask: FXTask<*>? = null
-                imageViewContainer = this
-                style {
-                    backgroundColor = multi(Color.LIGHTGRAY)
-                }
-                add(imageView.apply {
-                    setOnMouseClicked {
-                        if (it.button != MouseButton.PRIMARY) {
-                            return@setOnMouseClicked
+
+                stackpane {
+                    imageViewContainer = this
+                    prefWidth = 800.0
+                    style {
+                        backgroundColor = multi(Color.LIGHTGRAY)
+                    }
+                    add(imageView.apply {
+                        //dragging
+                        var mouseAnchorX = 0.0
+                        var mouseAnchorY = 0.0
+                        var initialTranslateX = 0.0
+                        var initialTranslateY = 0.0
+                        addEventFilter(MouseEvent.MOUSE_PRESSED) {
+                            // remember initial mouse cursor coordinates
+                            // and node position
+                            mouseAnchorX = it.x
+                            mouseAnchorY = it.y
+                            initialTranslateX = this.translateX
+                            initialTranslateY = this.translateY
                         }
+                        addEventFilter(MouseEvent.MOUSE_DRAGGED) {
+                            // shift node from its initial position by delta
+                            // calculated from mouse cursor movement
+                            this.translateX = initialTranslateX + it.x - mouseAnchorX
+                            this.translateY = initialTranslateY + it.y - mouseAnchorY
+                            initialTranslateX = this.translateX
+                            initialTranslateY = this.translateY
+                            //fixme:
+                            // 1. image covers others things
+                            // 2. image doens't properly resize when reloaded
+                            // 3. image yeets away sometime
+                        }
+
+                        setOnMouseClicked {
+                            if (it.button != MouseButton.PRIMARY) {
+                                it.consume()
+                                return@setOnMouseClicked
+                            }
+
+                            currentRegionTask?.cancel()
+                            unhighlightSelectedRegion()
+                            val x = (it.x / imageZoom.value / userZoom.value).toInt()
+                            val y = (it.y / imageZoom.value / userZoom.value).toInt()
+                            if (!inCellMap(Pos(x, y))) {
+                                it.consume()
+                                return@setOnMouseClicked
+                            }
+
+                            val tooltipAnchorX = it.screenX + 25
+                            val tooltipAnchorY = it.screenY
+                            regionTooltip.text = "(${x}, ${y}) - ${cellMap[x][y].biome.Name}, loading region..."
+                            regionTooltip.show(this, tooltipAnchorX, tooltipAnchorY)
+                            runAsync {
+                                currentRegionTask = this
+                                floodDetectRegion(Pos(x, y))
+                                if (!this.isCancelled) {
+                                    highlightSelectedRegion()
+                                }
+                            } ui {
+                                regionTooltip.text = "($x, $y) - ${cellMap[x][y].biome.Name}, size: $selectedRegionCellsCount"
+                                regionTooltip.show(imageView, tooltipAnchorX, tooltipAnchorY)
+                            }
+                            tooltipPos = Pair(it.screenX, it.screenY)
+                            it.consume()
+                        }
+                        setOnMouseMoved {
+                            val movedFar = sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40
+                            if (regionTooltip.isShowing && movedFar) {
+                                regionTooltip.hide()
+                                currentRegionTask?.cancel()
+                            }
+                        }
+                    })
+                    setOnDragOver {
+                        logger.log("Drag over")
+                        if (it.gestureSource != this) {
+                            it.acceptTransferModes(*TransferMode.COPY_OR_MOVE)
+                        }
+                        it.consume()
+                    }
+                    setOnDragDropped {
+                        logger.log("Drag dropped event detected")
+                        val file = it.dragboard.files[0]
+                        if (it.dragboard.hasFiles()) {
+                            it.isDropCompleted = true
+
+                            val path = file.absolutePath
+                            val validEnding = path.endsWith(".png") || path.endsWith(".jpeg") || path.endsWith(".jpg")
+                            if (validEnding) {
+                                loadImg(file)
+                            } else {
+                                logger.log("File found, but it is not an image, path: ${file.absolutePath}")
+                            }
+
+                        } else {
+                            logger.log("No files found in DragEvent ")
+                        }
+                    }
+                    setOnScroll {
+                        if (it.deltaY > 0) {
+                            userZoom.value *= 1.1
+                        } else if (it.deltaY < 0) {
+                            userZoom.value /= 1.1
+                        }
+                        logger.log("Zoom level: ${(userZoom.value * 100).fmt(2)}%")
 
                         currentRegionTask?.cancel()
-                        deselectRegion()
-                        val x = (it.x / imageZoom.value / userZoom.value).toInt()
-                        val y = (it.y / imageZoom.value / userZoom.value).toInt()
-                        val tooltipAnchorX = it.screenX + 25
-                        val tooltipAnchorY = it.screenY
-                        regionTooltip.text = "(${x}, ${y}) - ${cellMap[x][y].biome.Name}, loading region..."
-                        regionTooltip.show(this, tooltipAnchorX, tooltipAnchorY)
-                        runAsync {
-                            currentRegionTask = this
-                            floodDetectRegion(Pos(x, y))
-                            if (!this.isCancelled) {
-                                selectRegion()
-                            }
-                        } ui {
-                            regionTooltip.text = "($x, $y) - ${cellMap[x][y].biome.Name}, size: $selectedRegionCellsCount"
-                            regionTooltip.show(imageView, tooltipAnchorX, tooltipAnchorY)
-                        }
-                        tooltipPos = Pair(it.screenX, it.screenY)
                     }
-                    setOnMouseMoved {
-                        val movedFar = sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40
-                        if (regionTooltip.isShowing && movedFar) {
-                            regionTooltip.hide()
-                            currentRegionTask?.cancel()
-                        }
-
-                        if (it.isDragDetect && it.isSecondaryButtonDown) {
-                            logger.log("RMB-drag detected")
-                        }
-                    }
-                })
-                setOnDragOver {
-                    if (it.gestureSource != this) {
-                        it.acceptTransferModes(*TransferMode.COPY_OR_MOVE)
-                    }
-                    it.consume()
-                }
-                setOnDragDropped {
-                    logger.log("Drag dropped event detected")
-                    val file = it.dragboard.files[0]
-                    if (it.dragboard.hasFiles()) {
-                        it.isDropCompleted = true
-
-                        val path = file.absolutePath
-                        val validEnding = path.endsWith(".png") || path.endsWith(".jpeg") || path.endsWith(".jpg")
-                        if (validEnding) {
-                            loadImg(file)
-                        } else {
-                            logger.log("File found, but it is not an image, path: ${file.absolutePath}")
-                        }
-
-                    } else {
-                        logger.log("No files found in DragEvent ")
-                    }
-                }
-                setOnScroll {
-                    if (it.deltaY > 0) {
-                        userZoom.value *= 1.1
-                    } else if (it.deltaY < 0) {
-                        userZoom.value /= 1.1
-                    }
-                    logger.log("Zoom level: ${(userZoom.value * 100).fmt(2)}%")
-
-                    currentRegionTask?.cancel()
                 }
             }
         }
@@ -147,6 +177,7 @@ class MainView : View() {
         //detect appropriate zoom value when image or window  size changes
         val zoomDetector = ChangeListener<Any> { _, _, _ ->
             if (imageView.image != null) {
+                logger.log("zoom")
                 val widthScale = imageViewContainer.width / imageView.image.width
                 val heightScale = imageViewContainer.height / imageView.image.height
                 imageZoom.value = min(widthScale, heightScale)
@@ -156,8 +187,16 @@ class MainView : View() {
         root.widthProperty().addListener(zoomDetector)
         root.heightProperty().addListener(zoomDetector)
 
+        val resetTranslation = ChangeListener<Any> { _, _, _ ->
+            imageView.translateX = 0.0
+            imageView.translateY = 0.0
+        }
+
+        imageView.imageProperty().addListener(resetTranslation)
+
         //rescale image when zoom values change, also hide tooltip
         val rescaler = ChangeListener<Number> { _, _, _ ->
+            logger.log("rescaled")
             val scale = imageZoom.value * userZoom.value
             imageView.scaleX = scale
             imageView.scaleY = scale
@@ -237,7 +276,7 @@ class MainView : View() {
         while (unvisitedCellsStack.isNotEmpty()) {
             val cur = unvisitedCellsStack.removeAt(0)
             val cell: Cell = cellMap[cur.w][cur.h]
-            val isUnvisited = { it: Pos ->  !regionCells.contains(it) && it.w in 0 until cellMap.size && it.h in 0 until cellMap[it.w].size}
+            val isUnvisited = { it: Pos -> !regionCells.contains(it) && inCellMap(it) }
 
             cell.pos.getNeighbors().forEach {
                 if (isUnvisited(pos)) {
@@ -254,15 +293,28 @@ class MainView : View() {
         selectedRegionCellsCount = regionCells.size
     }
 
-    private fun selectRegion() {
-        selectedRegionBorders.forEach {
-            parsedImg.pixelWriter.setColor(it.w, it.h, colorFromRGB(0, 255, 0))
-        }
+    private fun inCellMap(pos: Pos): Boolean {
+        return pos.w in 0 until cellMap.size && pos.h in 0 until cellMap[pos.w].size
     }
 
-    private fun deselectRegion() {
-        selectedRegionBorders.forEach {
-            parsedImg.pixelWriter.setColor(it.w, it.h, cellMap[it.w][it.h].biome.Color)
+    private fun highlightSelectedRegion() {
+        colorInCells(selectedRegionBorders, Color.GREEN)
+    }
+
+    private fun unhighlightSelectedRegion() {
+        colorInCells(selectedRegionBorders, null)
+    }
+
+    /**
+     * if [color] is provided, fills image [pixels] with it, otherwise uses colors from CellMap
+     */
+    private fun colorInCells(pixels: Set<Pos>, color: Color?) {
+        pixels.forEach {
+            if (color != null) {
+                parsedImg.pixelWriter.setColor(it.w, it.h, color)
+            } else {
+                parsedImg.pixelWriter.setColor(it.w, it.h, cellMap[it.w][it.h].biome.Color)
+            }
         }
     }
 }

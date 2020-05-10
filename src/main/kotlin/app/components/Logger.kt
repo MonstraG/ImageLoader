@@ -17,6 +17,8 @@ class Logger : View() {
         //pref required to constrain it, and show scrollbars when content overflows.
         prefWidth = 200.0
         prefHeight = 700.0
+        minWidth = 200.0
+        minHeight = 0.0
 
         text {
             logArea = this
