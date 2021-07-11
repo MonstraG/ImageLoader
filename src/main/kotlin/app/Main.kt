@@ -1,10 +1,7 @@
 package app
 
 import app.models.*
-import app.utils.colorFromRGB
-import app.utils.findClosest
-import app.utils.fmt
-import app.utils.sq
+import app.utils.*
 import javafx.beans.property.SimpleStringProperty
 import javafx.beans.property.StringProperty
 import javafx.beans.value.ChangeListener
@@ -24,7 +21,6 @@ import tornadofx.*
 import java.io.File
 import java.io.FileInputStream
 import kotlin.math.min
-import kotlin.math.sqrt
 
 class MainView : View() {
     private var srcImg: Image = Image("bahamas.png")
@@ -37,9 +33,7 @@ class MainView : View() {
     private var imageZoom: Double = 1.0
     private var userZoom: Double = 1.0
 
-    private val regionTooltip: Tooltip = Tooltip().apply {
-        font = Font(12.0)
-    }
+    private val regionTooltip: Tooltip = Tooltip().apply { font = Font(12.0) }
     private var tooltipPos = Pair(0.0, 0.0)
 
     private lateinit var imageView: ImageView
@@ -119,7 +113,7 @@ class MainView : View() {
                         }
                         setOnMouseMoved {
                             if (regionTooltip.isShowing &&
-                                sqrt(sq(tooltipPos.first - it.screenX) + sq(tooltipPos.second - it.screenY)) > 40
+                                rss(tooltipPos.first - it.screenX, tooltipPos.second - it.screenY) > 40
                             ) {
                                 regionTooltip.hide()
                                 currentRegionTask?.cancel()
@@ -138,7 +132,7 @@ class MainView : View() {
                         if (it.dragboard.hasFiles()) {
                             val path = file.absolutePath
                             if (path.endsWith(".png") || path.endsWith(".jpeg") || path.endsWith(".jpg")) {
-                                loadImg(file)
+                                loadCustomImg(file)
                                 it.isDropCompleted = true
                                 log("Image loaded")
                                 return@setOnDragDropped
@@ -167,7 +161,7 @@ class MainView : View() {
         }
 
         selectedFile.onChange {
-            loadImg(selectedFile.value)
+            loadDefaultImg(selectedFile.value)
         }
 
         val stageSizeListener: ChangeListener<Number> =
@@ -192,16 +186,15 @@ class MainView : View() {
         }
     }
 
-    private fun loadImg(file: String) {
-        if (file == "") {
+    private fun loadDefaultImg(filename: String) {
+        if (filename == "") {
             return
         }
-
-        srcImg = Image(file)
+        srcImg = Image(filename) // default files included in executable
         loadAndParse()
     }
 
-    private fun loadImg(file: File) {
+    private fun loadCustomImg(file: File) {
         selectedFile.value = "" //deselect radio
         srcImg = Image(FileInputStream(file))
         loadAndParse()
