@@ -9,11 +9,9 @@ fun findClosest(color: Color, biomes: List<Biome>): Biome {
 }
 
 fun Color.distanceTo(other: Color): Double {
-    return sqrt(
-        sq(this.red - other.red) + sq(this.green - other.green) + sq(
-            this.blue - other.blue
-        )
-    )
+    return sqrt(sq(this.red - other.red) +
+                sq(this.green - other.green) +
+                sq(this.blue - other.blue))
 }
 
 /**
